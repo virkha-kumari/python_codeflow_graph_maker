@@ -196,7 +196,7 @@ See `requirements.txt` for complete dependency list.
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/yourusername/python_codeflow_graphmaker.git
+   git clone https://github.com/bnkf1156f/python_codeflow_graph_maker.git
    cd python_codeflow_graphmaker
    ```
 
