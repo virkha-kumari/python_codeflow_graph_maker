@@ -1,133 +1,129 @@
 # 🔄 Python Code Flow Graph Maker
 
-A comprehensive Python code analysis and visualization tool that automatically generates dependency graphs for Python codebases. This tool analyzes import dependencies, tracks I/O operations, and creates interactive visualizations to help developers understand code structure and dependencies across pre-built libraries and custom modules.
+A Python code analysis and visualization tool that generates dependency graphs for Python codebases. It parses every file with Python's `ast` module, maps import relationships between your own modules, the standard library and third-party libraries, detects I/O operations (with line numbers) from a built-in database of 122 patterns, and draws a color-coded dependency graph that starts from the entry file you choose.
 
 ## 🎯 Features
 
-- **Static Code Analysis**: Analyzes Python files using AST (Abstract Syntax Tree) parsing
-- **Dependency Tracking**: Maps import relationships between custom modules and external libraries
-- **Advanced I/O Operation Detection**: Identifies 100+ file operations, data loading/saving, and I/O patterns across 50+ libraries
-- **Interactive Visualization**: Generates dependency graphs with color-coded nodes and edges
-- **Web-based GUI**: Streamlit-powered interface with step-by-step workflow
-- **Export Capabilities**: Save analysis results as JSON and generate detailed dependencies report for *main_file* only
-- **Flexible Configuration**: Customizable exclusions for directories and files
-- **Comprehensive Reporting**: Detailed statistics, file information, and I/O operation tracking
-- **Error Handling**: Robust error handling for malformed files and encoding issues
+- **Static code analysis** with AST parsing. No code is executed.
+- **Dependency tracking** between custom modules, standard-library modules and external libraries.
+- **I/O operation detection**: 122 patterns across about 40 libraries and standard-library modules, each hit recorded with its line number.
+- **Function/class usage tracking**: calls and attribute accesses are mapped back to their source module through the alias table (`import pandas as pd` → `pd.read_csv` is recorded as `pandas.read_csv`).
+- **Dependency graph** of the chosen main file, followed recursively through local modules, with color-coded nodes, edge labels and a legend.
+- **Web GUI** (Streamlit) with a step-by-step workflow, plus a **command-line interface** that takes arguments.
+- **Exports**: JSON analysis results, a detailed text report for the main file, and a 300 DPI PNG of the graph (GUI).
+- **Codebase statistics**: totals plus top-5 lists of the largest files, most-imported modules and I/O-heavy files.
+- **Configurable exclusions** for directories and files, and an editable list of "pre-built" libraries.
+- **Error handling**: syntax errors, encoding errors and unreadable files are reported per file and skipped, so one bad file doesn't stop the analysis.
 
 ## 🏗️ Architecture & Algorithms
 
-### Core Analysis Algorithm
+### Core analysis: two-pass AST parsing
 
-The tool uses a **two-pass AST parsing approach**:
+1. **First pass: import analysis** (top-level statements of each file)
+   - Direct imports: `import module`
+   - Aliased imports: `import module as alias`
+   - From imports: `from module import item`
+   - Relative imports: `from . import item`
+   - Star imports: `from module import *`
+   - Future imports: `from __future__ import feature`
+   - Builds the alias map used for usage tracking.
 
-1. **First Pass - Import Analysis**:
-   - Parses all import statements using Python's `ast` module
-   - Handles multiple import types:
-     - Direct imports: `import module`
-     - Aliased imports: `import module as alias`
-     - From imports: `from module import item`
-     - Relative imports: `from . import item`
-     - Star imports: `from module import *`
-     - Future imports: `from __future__ import feature`
-   - Builds alias mapping for function/class usage tracking
+2. **Second pass: function and I/O analysis** (the whole tree via `ast.walk`)
+   - Finds function calls and attribute accesses.
+   - Maps each call to its source module using the alias map.
+   - Matches calls against the I/O pattern database (plus special cases such as `open()`, `Path(...).open()` and `DataLoader(...)`).
+   - Records each I/O operation with its line number.
 
-2. **Second Pass - Function & I/O Analysis**:
-   - Traverses AST to find function calls and attribute access
-   - Maps function calls to their source modules using alias mapping
-   - Detects I/O operations through comprehensive pattern matching
-   - Records specific I/O operations with line numbers for debugging
+### Dependency graph generation: recursive resolution
 
-### Dependency Graph Generation Algorithm
-
-The graph generation follows a **recursive dependency resolution** approach for *main_file* dependencies' visualization:
-
-```python
+```text
 Algorithm: RecursiveDependencyGraph
-Input: main_file, dependency_store, prebuilt_libs
-Output: Directed graph G
+Input:  main_file, dependency_store, prebuilt_libs
+Output: directed graph G
 
 1. Initialize empty directed graph G
-2. Add main_file as root node (yellow, square shape)
-3. For each import in main_file:
-   a. Try to map module to local file path
+2. Add main_file as the root node (yellow, square)
+3. For each import in the current file:
+   a. Try to map the module to a local file (root-level, then relative to the importing file)
    b. If found (custom module):
-      - Add as red node (circle shape)
-      - Recursively process its dependencies
-   c. If in prebuilt_libs or stdlib:
-      - Add as green node (circle shape)
-   d. If unknown:
-      - Add as purple node (circle shape)
-4. Add edges from dependent to dependency
-5. Apply shell layout with main file at center
+        add a red node and recurse into that file's imports
+   c. Else if it is a stdlib module or listed in prebuilt_libs.txt:
+        add a green node
+   d. Else:
+        add a purple node (unresolved)
+4. Add an edge from each dependent to its dependency
+5. Track visited nodes so circular imports do not loop forever
+6. Shell layout with the main file at the center
 ```
 
-### Advanced I/O Operation Detection
+### I/O operation detection
 
-The system maintains a comprehensive database of **100+ I/O operations** across **50+ libraries**:
+The pattern database in `analyzer.py` (`_is_io_operation`) contains **122 patterns**:
 
-#### **Basic File Operations**
-- `open()`, `gzip.open()`, `bz2.open()`, `lzma.open()`
+#### Basic file operations
+- `open()`, `gzip.open`, `bz2.open`, `lzma.open`, `io.open`, `io.StringIO`, `io.BytesIO`, `io.TextIOWrapper`
 
-#### **Data Science Libraries**
-- **Pandas**: `read_csv`, `read_json`, `read_excel`, `read_parquet`, `read_sql`, `read_html`, `read_xml`
+#### Data science and ML
+- **Pandas**: `read_csv`, `read_json`, `read_excel`, `read_parquet`, `read_feather`, `read_hdf`, `read_sql`, `read_html`, `read_xml`, and the matching `to_*` writers
 - **NumPy**: `load`, `save`, `loadtxt`, `savetxt`, `fromfile`, `tofile`, `genfromtxt`
 - **PyTorch**: `load`, `save`, `load_state_dict`, `save_state_dict`, `DataLoader`
-- **Scikit-learn**: `load_svmlight_file`, `joblib.load`, `joblib.dump`
+- **Scikit-learn / joblib**: `load_svmlight_file`, `joblib.load`, `joblib.dump`
 
-#### **Serialization & Configuration**
-- **JSON**: `json.load`, `json.dump`, `json.loads`, `json.dumps`
-- **Pickle**: `pickle.load`, `pickle.dump`, `pickle.loads`, `pickle.dumps`
-- **CSV**: `csv.reader`, `csv.writer`, `csv.DictReader`, `csv.DictWriter`
-- **YAML**: `yaml.safe_load`, `yaml.dump`, `yaml.safe_dump`
-- **TOML**: `toml.load`, `toml.dump`, `toml.loads`, `toml.dumps`
-- **ConfigParser**: `ConfigParser.read`, `ConfigParser.write`
+#### Serialization and configuration
+- **JSON**: `load`, `dump`, `loads`, `dumps`
+- **Pickle**: `load`, `dump`, `loads`, `dumps`
+- **CSV**: `reader`, `writer`, `DictReader`, `DictWriter`
+- **YAML**: `safe_load`, `dump`, `safe_dump`
+- **TOML**: `load`, `dump`, `loads`, `dumps`
+- **ConfigParser**: `read`, `write`
 
-#### **Database & Network Operations**
+#### Database and network
 - **SQLite**: `sqlite3.connect`
 - **SQLAlchemy**: `create_engine`
-- **Requests**: `requests.get`, `requests.post`, `requests.put`, `requests.delete`
+- **Requests**: `get`, `post`, `put`, `delete`
 - **urllib**: `urllib.request.urlopen`, `urllib.request.urlretrieve`
 
-#### **File System & Archives**
-- **Pathlib**: `Path.open`, `Path.read_text`, `Path.write_text`, `Path.mkdir`, `Path.rmdir`
-- **Shutil**: `shutil.copy`, `shutil.copy2`, `shutil.copyfile`, `shutil.copytree`, `shutil.move`, `shutil.rmtree`
-- **Zipfile**: `zipfile.ZipFile`, `zipfile.PyZipFile`, `zipfile.open`
-- **Tarfile**: `tarfile.open`, `tarfile.TarFile`
-- **Rarfile**: `rarfile.RarFile`, `rarfile.RarFile.extract`
+#### File system and archives
+- **Pathlib**: `Path.open`, `read_text`, `write_text`, `read_bytes`, `write_bytes`, `mkdir`, `rmdir`, `unlink`, `touch`
+- **Shutil**: `copy`, `copy2`, `copyfile`, `copytree`, `move`, `rmtree`
+- **Zipfile**: `ZipFile`, `PyZipFile`, `open`
+- **Tarfile**: `open`, `TarFile`
+- **Rarfile**: `RarFile`, `RarFile.extract`
 
-#### **Specialized Libraries**
-- **Image Processing**: `PIL.Image.open`, `PIL.Image.save`, `cv2.imread`, `cv2.imwrite`
-- **Audio Processing**: `librosa.load`, `librosa.output.write_wav`
+#### Specialized libraries
+- **Images**: `PIL.Image.open`, `PIL.Image.save`, `cv2.imread`, `cv2.imwrite`
+- **Audio**: `librosa.load`, `librosa.output.write_wav`
 - **HDF5**: `h5py.File`, `h5py.Group.create_dataset`, `h5py.Dataset.read`
 - **Excel**: `openpyxl.load_workbook`, `openpyxl.Workbook.save`
-- **XML**: `xml.etree.ElementTree.parse`, `lxml.etree.parse`
+- **XML**: `xml.etree.ElementTree.parse` / `write`, `lxml.etree.parse` / `write`
 - **PDF**: `PyPDF2.PdfReader`, `PyPDF2.PdfWriter.write`
 
-#### **Cloud Storage**
+#### Cloud storage
 - **AWS**: `boto3.client`
 - **Google Cloud**: `google.cloud.storage.Client`
 - **Azure**: `azure.storage.blob.BlobServiceClient`
 
-#### **Visualization Libraries**
-- **Matplotlib**: `matplotlib.pyplot.savefig`, `matplotlib.pyplot.imsave`
-- **Plotly**: `plotly.io.write_html`, `plotly.io.write_image`
-- **Seaborn**: `seaborn.savefig`
-- **Altair**: `altair.save`, `altair.renderer.save`
-
-#### **Web Frameworks**
-- **Streamlit**: `streamlit.file_uploader`, `streamlit.download_button`
+#### Visualization and web
+- **Matplotlib**: `pyplot.savefig`, `pyplot.imsave`
+- **Plotly**: `io.write_html`, `io.write_image`
+- **Seaborn**: `savefig`
+- **Altair**: `save`, `renderer.save`
+- **Streamlit**: `file_uploader`, `download_button`
 
 ## 🛠️ Technical Implementation
 
-### Key Components
+### Key components
 
-1. **`analyzer.py`**: Enhanced AST parsing and analysis engine with comprehensive I/O detection
-2. **`dependency_store.py`**: Advanced data persistence with summary statistics and analytics
-3. **`worker.py`**: Orchestration and graph generation logic with detailed reporting
-4. **`gui.py`**: Streamlit-based web interface with step-by-step workflow
-5. **`non_interactive_main.py`**: Command-line interface for automation
+| File | Role |
+|---|---|
+| `analyzer.py` | AST parsing and analysis engine: imports, function usage, I/O detection |
+| `dependency_store.py` | Stores per-file results, computes summary statistics and analytics, saves/loads JSON |
+| `worker.py` | Walks the codebase, prints the report, builds and draws the main-file dependency graph |
+| `gui.py` | Streamlit web interface with step-by-step workflow |
+| `non_interactive_main.py` | Command-line entry point |
+| `prebuilt_libs.txt` | Library names treated as "pre-built" (green nodes). Edit to taste. |
 
-### Enhanced Data Structures
+### Data structure
 
 ```python
 DependencyStore = {
@@ -137,7 +133,7 @@ DependencyStore = {
         "function_usage": {module: [functions]}
     }},
     "modules": {module_name: [dependent_files]},
-    "io_operations": {file_path: [detailed_operations_with_line_numbers]},
+    "io_operations": {file_path: [operations_with_line_numbers]},
     "function_usage": {file_path: {module: [functions]}},
     "file_info": {file_path: {
         "path": str,
@@ -155,197 +151,157 @@ DependencyStore = {
 }
 ```
 
-### Advanced Analytics Methods
+### Analytics methods
 
-The dependency store provides comprehensive analytics:
+- `get_summary()`: overall statistics for the codebase
+- `get_files_with_io()`: files containing I/O operations
+- `get_largest_files(limit)`: largest files by line count
+- `get_most_imported_modules(limit)`: most frequently imported modules
+- `get_files_by_io_count(limit)`: files with the most I/O operations
+- `get_file_io_operations(file_path)`: I/O operations of one file
+- `get_file_info(file_path)`: file metadata and statistics
+- `get_module_dependents(module)`: files that import a module
 
-- **`get_summary()`**: Overall statistics for the codebase
-- **`get_files_with_io()`**: Files containing I/O operations
-- **`get_largest_files(limit)`**: Largest files by line count
-- **`get_most_imported_modules(limit)`**: Most frequently imported modules
-- **`get_files_by_io_count(limit)`**: Files with most I/O operations
-- **`get_file_io_operations(file_path)`**: Detailed I/O operations for specific files
-- **`get_file_info(file_path)`**: File metadata and statistics
+### Visualization
 
-### Visualization Features
-
-- **Node Types**:
-  - 🟡 Yellow Square: Main entry file
-  - 🔴 Red Circle: Custom/local modules
-  - 🟢 Green Circle: Pre-built/external libraries
-  - 🟣 Purple Circle: Unknown/unresolved modules
-
-- **Layout**: Shell layout with main file at center
-- **Edge Labels**: Show dependency relationships
-- **Interactive**: Zoom, pan, and export capabilities
-- **High Resolution**: 300 DPI PNG export support
+- **Node types**:
+  - 🟡 Yellow square: main entry file
+  - 🔴 Red circle: custom/local module
+  - 🟢 Green circle: standard-library module or a library listed in `prebuilt_libs.txt`
+  - 🟣 Purple circle: unresolved module (not local, not stdlib, not in `prebuilt_libs.txt`)
+- **Layout**: shell layout with the main file at the center
+- **Edge labels**: `dependent --> dependency` (names shortened to 4 characters)
+- **Legend** explaining colors and edge labels
+- **Export**: 300 DPI PNG from the GUI
 
 ## 📋 Requirements
 
-### System Requirements
-- Python 3.8+
-- 4GB+ RAM (for large codebases)
-- 100MB+ disk space
-
-### Dependencies
-See `requirements.txt` for complete dependency list.
+- Python 3.10+ (uses `sys.stdlib_module_names`)
+- `streamlit`, `networkx`, `matplotlib`, `numpy` (see `requirements.txt`)
 
 ## 🚀 Installation & Usage
 
-### Quick Start
-
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/bnkf1156f/python_codeflow_graph_maker.git
-   cd python_codeflow_graphmaker
-   ```
-
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Run the GUI**:
-   ```bash
-   streamlit run gui.py
-   ```
-
-4. **Or use command line**:
-   ```bash
-   python non_interactive_main.py
-   ```
-
-### Configuration
-
-#### Excluding Directories/Files
-```python
-exclude_dirs = ["venv", ".git", "__pycache__", "node_modules"]
-exclude_files = ["test_file.py", "temp.py"]
+```bash
+git clone https://github.com/virkha-kumari/python_codeflow_graph_maker.git
+cd python_codeflow_graph_maker
+pip install -r requirements.txt
 ```
 
-#### Custom Pre-built Libraries
-Edit `prebuilt_libs.txt` to add your commonly used libraries.
+Run everything from the repository folder, because `prebuilt_libs.txt` and `output_files/` are resolved relative to the working directory.
+
+### Web UI (Streamlit)
+
+```bash
+streamlit run gui.py
+```
+
+A step-by-step flow: pick a folder (type the path, or use the tkinter folder picker on a desktop session), choose the main file, set exclusions, run the analysis, view the graph and statistics, then export the JSON, the text report and the 300 DPI PNG.
+
+### Command line
+
+```bash
+python non_interactive_main.py path/to/codebase path/to/codebase/main.py --exclude-dir tests --exclude-dir docs
+```
+
+Prints the per-file analysis, summary statistics, graph nodes and edges, and writes the JSON and text report to `output_files/`. It does not save the graph image (use the GUI for the PNG).
+
+| Argument | Meaning |
+|---|---|
+| `codebase_path` | Root folder of the codebase to analyze |
+| `main_file` | Entry-point `.py` file (absolute, or relative to `codebase_path`) |
+| `--exclude-dir NAME` | Directory name to skip (repeatable). `venv`, `.git`, `__pycache__` are always skipped. |
+| `--exclude-file NAME` | File name to skip (repeatable) |
+
+Example on this repo itself:
+
+```bash
+python non_interactive_main.py . gui.py
+```
 
 ## 📊 Output Formats
 
-### JSON Analysis Results
-```json
-{
-  "files": {
-    "main.py": {
-      "imports": ["pandas", "numpy", "custom_module"],
-      "io_count": 5,
-      "function_usage": {
-        "pandas": ["read_csv", "DataFrame"],
-        "numpy": ["array", "mean"]
-      }
-    }
-  },
-  "modules": {
-    "pandas": ["main.py", "utils.py"],
-    "custom_module": ["main.py"]
-  },
-  "io_operations": {
-    "main.py": [
-      "pandas.read_csv() at line 15",
-      "numpy.save() at line 23"
-    ]
-  },
-  "file_info": {
-    "main.py": {
-      "path": "main.py",
-      "size": 2048,
-      "lines": 50,
-      "empty": false
-    }
-  },
-  "summary": {
-    "total_files": 10,
-    "total_imports": 25,
-    "total_io_operations": 15,
-    "total_lines": 500,
-    "empty_files": 0
-  }
-}
-```
+### JSON analysis results
+The full `DependencyStore` structure above, saved as `output_files/dependencies_<folder>.json`.
 
-### Detailed Text Reports
-- **Dependency relationships** with module types
-- **I/O operation counts** with line numbers
-- **Function usage statistics** by module
-- **Module dependency chains** with categorization
-- **Analysis summary** with comprehensive statistics
-- **Top 5 lists** for largest files, most imported modules, and I/O-heavy files
+### Detailed text report
+Saved as `output_files/detailed_deps_<folder>.txt`:
+- Dependency relationships of the main file, with module types
+- I/O operations of the main file, with line numbers
+- Analysis summary (files, imports, I/O operations, lines, empty files)
 
-### Visual Graphs
-- **High-resolution PNG exports** (300 DPI)
-- **Interactive matplotlib figures** with zoom/pan
-- **Color-coded dependency visualization** with legend
-- **Edge labels** showing dependency relationships
+### Console report
+- Per-file imports, I/O operations with line numbers, and function usage by module
+- Analysis summary and top-5 lists for the largest files, most-imported modules and I/O-heavy files
+
+### Visual graph
+- Color-coded dependency graph with legend and edge labels
+- 300 DPI PNG export (GUI)
+
+## 📁 Demo output
+
+The two files committed in `output_files/` are **demo output results**, produced by running the tool on this repo itself (main file `gui.py`). They are kept so you can see what to expect before running anything:
+
+- `output_files/dependencies_python_codeflow_graphmaker.json`: the JSON dump of the analysis
+- `output_files/detailed_deps_python_codeflow_graphmaker.txt`: the text report
+
+The absolute paths inside them (`D:\Projects\python_codeflow_graphmaker\...`) are from the author's machine and are left as they are on purpose. Your own run will show your own paths. New output written to `output_files/` is gitignored, so your results are not committed by accident.
 
 ## ⚠️ Assumptions & Limitations
 
 ### Assumptions
-1. **File Structure**: Assumes script runs from the codebase root directory
-2. **Python Files**: Only analyzes `.py` and `.pyw` files
-3. **Import Resolution**: Relies on file naming conventions for module mapping
-4. **AST Parsing**: Assumes syntactically correct Python code
-5. **Encoding**: Assumes UTF-8 encoding for all source files
+1. Run from the repository folder (for `prebuilt_libs.txt` and `output_files/`).
+2. Only `.py` and `.pyw` files are analyzed.
+3. Module-to-file resolution relies on file and folder names.
+4. Source files are syntactically valid Python. Files that aren't are reported and skipped.
+5. Source files are UTF-8. Files that aren't are reported and skipped.
 
 ### Limitations
-1. **Dynamic Imports**: Cannot detect `importlib.import_module()` or `__import__()` calls
-2. **String-based Imports**: Misses imports constructed from strings
-3. **Runtime Dependencies**: Only analyzes static dependencies, not runtime behavior
-4. **Circular Dependencies**: May not handle complex circular import scenarios gracefully
-5. **Large Codebases**: Performance may degrade with very large repositories (>1000 files)
-6. **External Dependencies**: Cannot resolve dependencies of external packages
-7. **Conditional Imports**: May miss imports within conditional blocks if not executed
+1. The graph covers the dependencies of **one main file**, not the whole codebase at once.
+2. Dynamic imports (`importlib.import_module`, `__import__`) and imports built from strings are not detected.
+3. Imports inside functions, classes or `if`/`try` blocks are not recorded (only top-level imports are).
+4. Static analysis only. Runtime behavior is not observed.
+5. Dependencies of external packages are not followed.
+6. The graph is a static matplotlib figure. Large graphs get crowded.
+7. Behavior on very large codebases (1000+ files) is untested.
+8. No automated test suite yet. It has been run on small projects, including itself.
 
-### Known Issues
-- Relative imports with complex parent directory structures
-- Module aliasing in complex scenarios
-- Some edge cases in star import analysis
-- Limited support for namespace packages
+### Known issues
+- Relative imports with complex parent-directory structures may resolve incorrectly.
+- Module aliasing in complex scenarios.
+- Some edge cases in star-import analysis.
+- Limited support for namespace packages.
 
 ## 🔧 Customization
 
-### Adding New I/O Patterns
-Edit the `_is_io_operation()` function in `analyzer.py`:
+### Adding new I/O patterns
+Add entries to the `io_patterns` set in `_is_io_operation()` in `analyzer.py`:
 
 ```python
-def _is_io_operation(full_name: str) -> bool:
-    io_patterns = {
-        # Add your custom patterns here
-        "your_library.read_data",
-        "your_library.save_data",
-        # ... existing patterns
-    }
-    return full_name in io_patterns
-```
-
-### Custom Node Colors
-Modify the color mapping in `worker.py`:
-
-```python
-node_colors = {
-    'main': 'yellow',
-    'custom': 'red', 
-    'prebuilt': 'green',
-    'unknown': 'purple'
+io_patterns = {
+    # Add your custom patterns here
+    "your_library.read_data",
+    "your_library.save_data",
+    # ... existing patterns
 }
 ```
 
-### Extending Analysis
-Add new analysis functions to `analyzer.py` and integrate them into the main analysis pipeline.
+### Pre-built libraries
+Add library names to `prebuilt_libs.txt`, one per line, to have them drawn as green nodes.
 
-## 🧑‍💻 Concepts/DS/Libraries Used
+### Node colors
+Colors are set in `graph_maker()` in `worker.py` (`yellow`, `red`, `green`, `purple`) and can be changed there.
 
-- **Python AST Module**: For static code analysis capabilities
-- **NetworkX**: For graph generation and layout algorithms
-- **Matplotlib**: For visualization and plotting
-- **Streamlit**: For the web-based user interface
-- **Pandas & NumPy**: For data manipulation and analysis
+## 🧑‍💻 Concepts / Libraries Used
+
+- **Python `ast` module**: static code analysis
+- **NetworkX**: graph construction and layout
+- **Matplotlib**: graph rendering and PNG export
+- **Streamlit**: web interface
+
+## Licence
+
+None yet. Add one before reusing the code.
 
 ---
 
-**Made with ❤️ for the Python community. If there is a problem in any part, please don't hesitate to open issue!** 
+**Made with ❤️ for the Python community. If something doesn't work, please open an issue!**

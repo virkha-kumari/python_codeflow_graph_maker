@@ -1,23 +1,40 @@
+import argparse
 import os
+
 from worker import dependency_store_maker, graph_maker
 
-if __name__=="__main__":
-    codebase_path='D:/Projects/python_codeflow_graphmaker'
-    main_file='D:/Projects/python_codeflow_graphmaker/gui.py'
-    exclude_always_dirs=["venv", ".git", "__pycache__"]
-    exclude_as_per_rqst_dirs=["codeflow_maker"] #as per request some dirs are ignored
 
-    exclude_always_files=["ignore_this.py"]
-    exclude_as_per_rqst_files=[]
-
-    dependency_store, num_py_files=dependency_store_maker(
-        folder_path=codebase_path,
-        exclude_dirs=exclude_always_dirs+exclude_as_per_rqst_dirs,
-        exclude_files=exclude_always_files+exclude_as_per_rqst_files
+def main():
+    parser = argparse.ArgumentParser(
+        description="Analyze a Python codebase and write a dependency report for one main file."
     )
-    
-    codebase_root = os.path.abspath(codebase_path)
+    parser.add_argument("codebase_path", help="Root folder of the codebase to analyze")
+    parser.add_argument("main_file", help="Entry-point .py file (absolute, or relative to codebase_path)")
+    parser.add_argument("--exclude-dir", action="append", default=[],
+                        help="Directory name to skip (repeatable). venv, .git, __pycache__ are always skipped.")
+    parser.add_argument("--exclude-file", action="append", default=[],
+                        help="File name to skip (repeatable)")
+    args = parser.parse_args()
+
+    codebase_root = os.path.abspath(args.codebase_path)
+    main_file = args.main_file
+    if not os.path.isabs(main_file):
+        main_file = os.path.join(codebase_root, main_file)
+
+    dependency_store, num_py_files = dependency_store_maker(
+        folder_path=codebase_root,
+        exclude_dirs=["venv", ".git", "__pycache__"] + args.exclude_dir,
+        exclude_files=args.exclude_file,
+    )
+
     main_file_rel = os.path.relpath(main_file, codebase_root).replace("\\", "/")
-    print("main_file_rel:", main_file_rel)
-    det_deps_path=graph_maker(dependency_store=dependency_store, main_folder_path=codebase_path,
-                            main_file_path=main_file_rel)
+    print(f"Analyzed {num_py_files} Python files. Main file: {main_file_rel}")
+    graph_maker(
+        dependency_store=dependency_store,
+        main_folder_path=codebase_root,
+        main_file_path=main_file_rel,
+    )
+
+
+if __name__ == "__main__":
+    main()
